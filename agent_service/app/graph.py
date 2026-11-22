@@ -6,6 +6,8 @@ from langchain_groq import ChatGroq
 from tavily import TavilyClient
 from langgraph.graph import StateGraph, END
 
+from langsmith import traceable
+
 from agent_service.app.schemas import ResearchReport
 
 # .env load karein
@@ -44,13 +46,17 @@ def planner_node(state: ResearchState) -> dict:
     response = structured_planner.invoke(prompt)
     return {"search_queries": response.queries}
 
+@traceable(run_type="tool", name="Tavily Web Search")
+def search_web(query: str) -> dict:
+    return tavily.search(query=query, max_results=3)
+
 # Node 2: Tavily se Live Web Data Nikalna
 def researcher_node(state: ResearchState) -> dict:
     collected_notes = []
     collected_urls = set()
 
     for query in state["search_queries"]:
-        search_res = tavily.search(query=query, max_results=3)
+        search_res = search_web(query)  # <-- Ab yeh LangSmith mein alag tool span dikhega
         for item in search_res.get("results", []):
             title = item.get("title", "")
             content = item.get("content", "")
