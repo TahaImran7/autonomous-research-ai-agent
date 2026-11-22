@@ -1,10 +1,10 @@
-# 🔎 Autonomous Tech & Market Research Agent (Decoupled Microservice Architecture)
+# Autonomous Tech & Market Research Agent (Decoupled Microservice Architecture)
 
 A production-grade, **100% asynchronous, decoupled AI agent microservice** built with Python. Instead of blocking client web applications with long-running LLM and web-search loops, this system separates the user-facing client from an event-driven background agent worker using a message broker, persistent state storage, and full LLM observability.
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 ```text
 ┌─────────────────────────┐       POST /research (202 Accepted)       ┌─────────────────────────┐
@@ -59,7 +59,7 @@ A production-grade, **100% asynchronous, decoupled AI agent microservice** built
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```text
 Production_AI_Agent_Deployment/
@@ -83,7 +83,7 @@ Production_AI_Agent_Deployment/
 
 ---
 
-## 🚀 Live Deployments & API Usage
+## Live Deployments & API Usage
 
 * **Client Web App:** `https://<your-streamlit-url>.streamlit.app`
 * **Agent Microservice API:** `https://<your-render-url>.onrender.com`
@@ -122,7 +122,7 @@ while True:
 
 ---
 
-## 💻 Local Development Setup (Windows PowerShell)
+## Local Development Setup (Windows PowerShell)
 
 1. **Clone & Create Virtual Environment:**
    ```powershell
