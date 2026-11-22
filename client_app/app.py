@@ -30,7 +30,7 @@ if submitted and topic.strip():
             f"{AGENT_SERVICE_URL}/research",
             json={"topic": topic.strip()},
             headers=HEADERS,
-            timeout=30
+            timeout=60
         )
         res.raise_for_status()
         task_data = res.json()
@@ -45,7 +45,7 @@ if submitted and topic.strip():
             status_res = requests.get(
                 f"{AGENT_SERVICE_URL}/tasks/{task_id}",
                 headers=HEADERS,
-                timeout=10
+                timeout=60
             )
             status_res.raise_for_status()
             current_data = status_res.json()
