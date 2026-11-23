@@ -19,13 +19,13 @@ primary_llm = ChatGroq(
 )
 
 fallback_llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="qwen/qwen3.8-27b",
     temperature=0.2,
     max_retries=2,
     model_kwargs={"response_format": {"type": "json_object"}}
 )
 
-# Agar primary_llm rate-limit (429) ya error de, to automatically fallback_llm chalega
+# If primary_llm hits a rate limit (429) or throws an error, fallback_llm will run automatically
 llm = primary_llm.with_fallbacks([fallback_llm])
 
 tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
@@ -67,7 +67,7 @@ def researcher_node(state: ResearchState) -> dict:
     collected_urls = set()
     queries = state["search_queries"]
 
-    # Teeno queries ek saath parallel run hongi (3x faster)
+    # All three queries will run concurrently in parallel (3x faster)
     with ThreadPoolExecutor(max_workers=3) as executor:
         results = list(executor.map(search_web, queries))
 

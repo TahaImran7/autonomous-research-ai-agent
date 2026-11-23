@@ -16,7 +16,7 @@ app = FastAPI(
     version="1.1.0"
 )
 
-AGENT_API_KEY = os.getenv("AGENT_API_KEY", "super-secret-agent-key-123")
+AGENT_API_KEY = os.getenv("AGENT_API_KEY", "secret-agent-key-9098")
 REDIS_URL = os.getenv("REDIS_URL")
 
 if REDIS_URL and REDIS_URL.startswith("rediss://"):

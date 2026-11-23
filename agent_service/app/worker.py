@@ -11,7 +11,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 REDIS_URL = os.getenv("REDIS_URL")
 
-# Celery app initialize karein Upstash Redis ke saath
+# Initialize the Celery app with Upstash Redis
 celery_app = Celery(
     "research_worker",
     broker=REDIS_URL,
@@ -43,19 +43,19 @@ celery_app.conf.update(
 def execute_research_task(self, task_id: str):
     db = SessionLocal()
     try:
-        # 1. Database se task fetch karein
+        # 1. fetch task from DB
         task = db.query(AgentTask).filter(AgentTask.id == task_id).first()
         if not task:
             return {"status": "error", "message": "Task not found"}
 
-        # 2. Status RUNNING update karein
+        # 2. update RUNNING status
         task.status = "RUNNING"
         db.commit()
 
-        # 3. LangGraph + Groq Research Pipeline chalayein
+        # 3. run LangGraph + Groq Research Pipeline
         report_dict = run_research_pipeline(task.topic)
 
-        # 4. Result save karein aur status COMPLETED karein
+        # 4. save results and mark status as COMPLETED
         task.result = json.dumps(report_dict)
         task.status = "COMPLETED"
         db.commit()
@@ -64,11 +64,11 @@ def execute_research_task(self, task_id: str):
 
     except Exception as exc:
         db.rollback()
-        # Agar retries bachi hain to retry karein
+        # if retries left then retry it
         if self.request.retries < self.max_retries:
             raise self.retry(exc=exc)
 
-        # Final failure par database mein error record karein
+        # record the error in database in case of final failure
         task = db.query(AgentTask).filter(AgentTask.id == task_id).first()
         if task:
             task.status = "FAILED"
