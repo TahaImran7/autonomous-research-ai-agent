@@ -1,31 +1,36 @@
 import os
+import json
+from concurrent.futures import ThreadPoolExecutor
 from typing import TypedDict, List
-from dotenv import load_dotenv
-from pydantic import BaseModel, Field
-from langchain_groq import ChatGroq
-from tavily import TavilyClient
 from langgraph.graph import StateGraph, END
-
+from langchain_groq import ChatGroq
+from langchain_core.messages import SystemMessage, HumanMessage
+from tavily import TavilyClient
 from langsmith import traceable
 
 from agent_service.app.schemas import ResearchReport
 
-# .env load karein
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
-
-# Clients initialize karein (Model name apni Groq console ke mutabiq rakhein)
-llm = ChatGroq(
+# 1. Primary + Fallback LLM Setup (JSON Mode enforced on both)
+primary_llm = ChatGroq(
     model="openai/gpt-oss-120b",
     temperature=0.2,
-    api_key=os.getenv("GROQ_API_KEY")
+    max_retries=2,
+    model_kwargs={"response_format": {"type": "json_object"}}
 )
+
+fallback_llm = ChatGroq(
+    model="llama-3.3-70b-versatile",
+    temperature=0.2,
+    max_retries=2,
+    model_kwargs={"response_format": {"type": "json_object"}}
+)
+
+# Agar primary_llm rate-limit (429) ya error de, to automatically fallback_llm chalega
+llm = primary_llm.with_fallbacks([fallback_llm])
+
 tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
-# Helper Schema for Planner Node
-class SearchQueries(BaseModel):
-    queries: List[str] = Field(description="2 to 3 targeted web search queries")
 
-# LangGraph State Definition
 class ResearchState(TypedDict):
     topic: str
     search_queries: List[str]
@@ -33,30 +38,40 @@ class ResearchState(TypedDict):
     sources: List[str]
     final_report: dict
 
-# Node 1: Search Queries Plan Karna (json_mode ke saath)
+
+# Node 1: Planner
 def planner_node(state: ResearchState) -> dict:
-    structured_planner = llm.with_structured_output(SearchQueries, method="json_mode")
-    prompt = (
-        f"You are a senior technical & market research planner. "
-        f"Generate 3 concise, high-signal web search queries to thoroughly research: '{state['topic']}'. "
-        f"Focus on architecture/product details, competitors, and current risks.\n\n"
-        f"Respond ONLY in valid JSON matching this exact schema: "
-        f'{{"queries": ["query 1", "query 2", "query 3"]}}'
-    )
-    response = structured_planner.invoke(prompt)
-    return {"search_queries": response.queries}
+    prompt = f"""You are a senior technical research planner.
+Given the research topic: "{state['topic']}"
+Generate 3 focused web search queries to gather current, factual, and comprehensive market/technical intelligence.
+
+Return ONLY a valid JSON object with this exact schema:
+{{"queries": ["query 1", "query 2", "query 3"]}}"""
+
+    response = llm.invoke([
+        SystemMessage(content="You output strict JSON only."),
+        HumanMessage(content=prompt)
+    ])
+    parsed = json.loads(response.content)
+    return {"search_queries": parsed.get("queries", [state["topic"]])}
+
 
 @traceable(run_type="tool", name="Tavily Web Search")
 def search_web(query: str) -> dict:
     return tavily.search(query=query, max_results=3)
 
-# Node 2: Tavily se Live Web Data Nikalna
+
+# Node 2: Parallel Researcher
 def researcher_node(state: ResearchState) -> dict:
     collected_notes = []
     collected_urls = set()
+    queries = state["search_queries"]
 
-    for query in state["search_queries"]:
-        search_res = search_web(query)  # <-- Ab yeh LangSmith mein alag tool span dikhega
+    # Teeno queries ek saath parallel run hongi (3x faster)
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        results = list(executor.map(search_web, queries))
+
+    for search_res in results:
         for item in search_res.get("results", []):
             title = item.get("title", "")
             content = item.get("content", "")
@@ -70,49 +85,40 @@ def researcher_node(state: ResearchState) -> dict:
         "sources": list(collected_urls)
     }
 
-# Node 3: Structured Executive Report Banana (json_mode ke saath)
+
+# Node 3: Analyst
 def analyst_node(state: ResearchState) -> dict:
-    structured_analyst = llm.with_structured_output(ResearchReport, method="json_mode")
-    prompt = (
-        f"You are an expert industry analyst. Synthesize the following web research into a structured report "
-        f"about '{state['topic']}'. Rely ONLY on the provided research context and include the exact source URLs.\n\n"
-        f"RESEARCH CONTEXT:\n{state['raw_research']}\n\n"
-        f"AVAILABLE SOURCE URLS:\n{state['sources']}\n\n"
-        f"Respond ONLY in valid JSON matching this exact schema:\n"
-        f'{{"executive_summary": "string", '
-        f'"key_findings": ["string"], '
-        f'"competitors_or_alternatives": ["string"], '
-        f'"risks_and_challenges": ["string"], '
-        f'"sources": ["string"]}}'
-    )
-    report: ResearchReport = structured_analyst.invoke(prompt)
-    return {"final_report": report.model_dump()}
+    schema_hint = json.dumps(ResearchReport.model_json_schema(), indent=2)
+    prompt = f"""You are a principal market and technology analyst.
+Synthesize the following raw web research into a high-signal executive report on: "{state['topic']}"
 
-# LangGraph Build & Compile
-def build_research_graph():
-    workflow = StateGraph(ResearchState)
+RAW RESEARCH:
+{state['raw_research'][:14000]}
 
-    workflow.add_node("planner", planner_node)
-    workflow.add_node("researcher", researcher_node)
-    workflow.add_node("analyst", analyst_node)
+AVAILABLE SOURCE URLS:
+{json.dumps(state['sources'])}
 
-    workflow.set_entry_point("planner")
-    workflow.add_edge("planner", "researcher")
-    workflow.add_edge("researcher", "analyst")
-    workflow.add_edge("analyst", END)
+Return ONLY a valid JSON object strictly matching this Pydantic JSON schema:
+{schema_hint}"""
 
-    return workflow.compile()
+    response = llm.invoke([
+        SystemMessage(content="You are an analytical engine that outputs strict valid JSON only."),
+        HumanMessage(content=prompt)
+    ])
 
-# Reusable compiled graph instance
-research_agent = build_research_graph()
+    report_obj = ResearchReport.model_validate_json(response.content)
+    return {"final_report": report_obj.model_dump()}
 
-def run_research_pipeline(topic: str) -> dict:
-    initial_state = {
-        "topic": topic,
-        "search_queries": [],
-        "raw_research": "",
-        "sources": [],
-        "final_report": {}
-    }
-    final_state = research_agent.invoke(initial_state)
-    return final_state["final_report"]
+
+# Build LangGraph
+workflow = StateGraph(ResearchState)
+workflow.add_node("planner", planner_node)
+workflow.add_node("researcher", researcher_node)
+workflow.add_node("analyst", analyst_node)
+
+workflow.set_entry_point("planner")
+workflow.add_edge("planner", "researcher")
+workflow.add_edge("researcher", "analyst")
+workflow.add_edge("analyst", END)
+
+research_agent = workflow.compile()
