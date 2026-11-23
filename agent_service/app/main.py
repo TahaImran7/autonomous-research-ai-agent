@@ -107,8 +107,8 @@ def get_task_status(
         task_id=task.id,
         topic=task.topic,
         status=task.status,
-        report=task.report,
-        error_message=task.error_message,
+        report=getattr(task, "result", None) or getattr(task, "report_json", None) or getattr(task, "report", None),
+        error_message=getattr(task, "error_message", None),
         created_at=task.created_at,
-        completed_at=task.completed_at
+        completed_at=getattr(task, "completed_at", None)
     )
