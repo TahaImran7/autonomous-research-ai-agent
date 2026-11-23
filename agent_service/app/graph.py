@@ -122,3 +122,15 @@ workflow.add_edge("researcher", "analyst")
 workflow.add_edge("analyst", END)
 
 research_agent = workflow.compile()
+
+# Entrypoint called by worker.py
+def run_research_pipeline(topic: str) -> dict:
+    initial_state: ResearchState = {
+        "topic": topic,
+        "search_queries": [],
+        "raw_research": "",
+        "sources": [],
+        "final_report": {}
+    }
+    final_state = research_agent.invoke(initial_state)
+    return final_state["final_report"]
