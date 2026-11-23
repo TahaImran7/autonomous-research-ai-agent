@@ -1,6 +1,7 @@
 import os
 import ssl
 import uuid
+import json
 import redis
 from fastapi import FastAPI, Depends, HTTPException, Header, status
 from sqlalchemy.orm import Session
@@ -18,14 +19,13 @@ app = FastAPI(
 AGENT_API_KEY = os.getenv("AGENT_API_KEY", "super-secret-agent-key-123")
 REDIS_URL = os.getenv("REDIS_URL")
 
-# Upstash TLS/SSL support ke saath Redis client
 if REDIS_URL and REDIS_URL.startswith("rediss://"):
     redis_client = redis.from_url(REDIS_URL, ssl_cert_reqs=ssl.CERT_NONE)
 else:
     redis_client = redis.from_url(REDIS_URL)
 
-RATE_LIMIT_MAX_REQUESTS = 5   # Max requests
-RATE_LIMIT_WINDOW_SECONDS = 60  # Per 60 seconds
+RATE_LIMIT_MAX_REQUESTS = 5
+RATE_LIMIT_WINDOW_SECONDS = 60
 
 
 @app.on_event("startup")
@@ -34,14 +34,12 @@ def on_startup():
 
 
 def verify_api_key_and_rate_limit(x_api_key: str = Header(...)):
-    # 1. Authentication Check
     if x_api_key != AGENT_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API Key"
         )
 
-    # 2. Redis Rate Limiting Check (Fixed Window Counter)
     rate_key = f"rate_limit:{x_api_key}"
     current_count = redis_client.incr(rate_key)
     if current_count == 1:
@@ -92,7 +90,6 @@ def get_task_status(
     x_api_key: str = Header(...),
     db: Session = Depends(get_db)
 ):
-    # GET polling par rate limit nahi lagate taake client har 3s check kar sake
     if x_api_key != AGENT_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -103,12 +100,14 @@ def get_task_status(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
+    parsed_report = json.loads(task.result) if task.result else None
+
     return TaskStatusResponse(
         task_id=task.id,
         topic=task.topic,
         status=task.status,
-        report=getattr(task, "result", None) or getattr(task, "report_json", None) or getattr(task, "report", None),
-        error_message=getattr(task, "error_message", None),
+        report=parsed_report,
+        error_message=task.error_message,
         created_at=task.created_at,
-        completed_at=getattr(task, "completed_at", None)
+        completed_at=task.updated_at if task.status in ("COMPLETED", "FAILED") else None
     )
