@@ -77,7 +77,7 @@ def trigger_research(request: ResearchRequest, db: Session = Depends(get_db)):
     db.add(new_task)
     db.commit()
 
-    execute_research_task.delay(task_id, request.topic)
+    execute_research_task.delay(task_id)
 
     return TaskAcceptedResponse(
         task_id=task_id,
